@@ -39,7 +39,7 @@ final int RESERVOIR_BL = 1; // Bottom-Left
 final int RESERVOIR_TR = 2; // Top-Right
 final int RESERVOIR_BR = 3; // Bottom-Right
 
-final int sequenceFrameDelay = 300; // Milliseconds delay between sequence frames (slowed for debug)
+final int sequenceFrameDelay = 600; // Milliseconds delay between sequence frames (slowed for debug)
 
 // Sequence of 4-bit nibbles for dispensing. This is now used for all reservoirs.
 final byte[] dispenseSequence = {
@@ -48,15 +48,16 @@ final byte[] dispenseSequence = {
   0b0111, // Electrode 1, 2 and 3
   0b0001, // Electrode 3 (Drop frame target)
   0b1100, // Electrode 0 and 1
-  0b1000, // Electrode 0
-  0b0000  // All off
+  0b1010, // Electrode 0 and 2
+  0b1010 // Electrode 0 and 2
 };
 final int dispenseDropFrame = 3; // 0-indexed frame where drop moves to main grid.
 
 // Timing for game updates
 long lastMoveTime = 0;
-int moveInterval = 300; // Milliseconds between snake moves. Lower is faster.
-int foodMoveDelay = 100; // Milliseconds between food animation steps. Lower is faster.
+int moveInterval = 400; // Milliseconds between snake moves. Lower is faster.
+int foodMoveDelay = 400; // Milliseconds between food animation steps. Lower is faster.
+int foodMoveStartDelay = 100; // Milliseconds delay after dispense before food starts moving.
 int dispenseClearDelay = 50;  // ms delay after clearing the reservoir before starting.
 int dispenseEndDelay = 100;   // ms delay after the sequence is fully complete.
 
@@ -108,15 +109,18 @@ void setupGame() {
       electrodes[c][r] = false;
     }
   }
-  specialElectrodesLeft = 0; // Also clear special electrodes before a clean dispense
-  specialElectrodesRight = 0;
+  // Set default state for all reservoirs to keep electrode 0 active
+  // The upper nibble (BL/BR) is the reverse of the lower nibble (TL/TR)
+  specialElectrodesLeft = (byte) 0b00011000;  // BL (rev) | TL (normal)
+  specialElectrodesRight = (byte) 0b00011000; // BR (rev) | TR (normal)
+
   transmit(); // Send cleared state
   delay(50); // Short delay
 
-  // Dispense snake from Top-Left reservoir
-  dispenseSequenceAndPlaceDrop(RESERVOIR_TL); 
+  // Dispense snake from Bottom-Left reservoir
+  dispenseSequenceAndPlaceDrop(RESERVOIR_BL); 
   snake = new ArrayList<PVector>();
-  snake.add(getDispenseLocation(RESERVOIR_TL)); // Snake starts where TL reservoir places its drop
+  snake.add(getDispenseLocation(RESERVOIR_BL)); // Snake starts where BL reservoir places its drop
   println("Snake drop dispensed at (" + snake.get(0).x + "," + snake.get(0).y + ")");
 
   // Dispense and move food to its first random location
@@ -199,16 +203,12 @@ ArrayList<Integer> getPrioritizedReservoirs(PVector target) {
   boolean targetIsOnRight = target.x >= GRID_WIDTH / 2;
 
   if (targetIsOnRight) {
-    // Prioritize right-side reservoirs
-    reservoirs.add(RESERVOIR_TR);
+    // Prioritize the bottom-right reservoir, with bottom-left as a fallback.
     reservoirs.add(RESERVOIR_BR);
-    reservoirs.add(RESERVOIR_TL);
     reservoirs.add(RESERVOIR_BL);
   } else {
-    // Prioritize left-side reservoirs
-    reservoirs.add(RESERVOIR_TL);
+    // Prioritize the bottom-left reservoir, with bottom-right as a fallback.
     reservoirs.add(RESERVOIR_BL);
-    reservoirs.add(RESERVOIR_TR);
     reservoirs.add(RESERVOIR_BR);
   }
   return reservoirs;
@@ -479,6 +479,9 @@ void dispenseSequenceAndPlaceDrop(int reservoirId, boolean moveDuringSequence, A
 
     // --- Part 2: If moving, animate the droplet along the rest of the path ---
     if (moveDuringSequence) {
+        // Pause for a moment before starting the movement across the grid
+        delay(foodMoveStartDelay);
+
         // Start from the second step of the path, since the first step was the handoff.
         for (int pathIndex = 1; pathIndex < path.size(); pathIndex++) {
             food = path.get(pathIndex).copy();
@@ -489,7 +492,12 @@ void dispenseSequenceAndPlaceDrop(int reservoirId, boolean moveDuringSequence, A
     }
 
     // --- Part 3: Clean up reservoir and finalize ---
-    updateReservoirState(reservoirId, (byte) 0b0000);
+    byte defaultNibble = 0b1000;
+    // The bottom reservoirs need their default state nibble reversed.
+    if (reservoirId == RESERVOIR_BL || reservoirId == RESERVOIR_BR) {
+      defaultNibble = reverseNibble(defaultNibble);
+    }
+    updateReservoirState(reservoirId, defaultNibble);
     transmit();
     delay(dispenseEndDelay);
     println("Dispense complete for reservoir " + reservoirId + ". Drop at (" + endPos.x + "," + endPos.y + ")");
